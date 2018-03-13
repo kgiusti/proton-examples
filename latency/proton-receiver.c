@@ -102,6 +102,7 @@ typedef struct
   unsigned no_time_msgs;      // message did not contain a timestamp
 
   time_t start;
+  time_t first_msg;
   unsigned long received_count;
   // these are all in msec
   float max_latency;
@@ -426,10 +427,12 @@ static void event_handler (pn_handler_t * handler,
 	if (pn_delivery_readable (dlv) && !pn_delivery_partial (dlv))
 	  {
 	    // A full message has arrived
+            ssize_t len;
+            time_t _now = now ();
+            if (!data->first_msg) data->first_msg = _now;
+
 	    if (data->latency)
 	      {
-		ssize_t len;
-		time_t _now = now ();
 		// try to decode the message body
 		if (pn_delivery_pending (dlv) > data->buffer_len)
 		  {
@@ -455,9 +458,7 @@ static void event_handler (pn_handler_t * handler,
                         process_message (data, _now);
                       }
 		  }
-	      } else {
-		ssize_t len;
-		time_t _now = now ();
+	      } else if (0) {
 		// try to decode the message body
 		if (pn_delivery_pending (dlv) > data->buffer_len)
 		  {
@@ -480,7 +481,7 @@ static void event_handler (pn_handler_t * handler,
 			pn_message_decode (data->message, data->decode_buffer,
 					   len))
                       {
-                        process_message (data, _now);
+                          process_message (data, _now);
                       }
 		  }
 	    }
@@ -754,10 +755,13 @@ int main (int argc, char *argv[])
       display_latency (app_data);
     }
 
-  pn_decref (handler);
-  printf("Done!\nmessages:%d\ndropped:%d\n",
+  float duration = (now() - app_data->first_msg)/1000.0;
+  printf("Recvr Done! messages:%d dropped:%d duration:%f rate:%f\n",
 	 app_data->received_msgs,
-	 app_data->dropped_msgs);
+	 app_data->dropped_msgs,
+         duration,
+         duration ? (app_data->received_msgs + app_data->dropped_msgs)/duration : -1.0);
+  pn_decref (handler);
 
   return 0;
 }

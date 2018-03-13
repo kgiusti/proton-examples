@@ -8,10 +8,10 @@
 all: proton-sender proton-receiver
 
 proton-sender: proton-sender.c proton-common.c
-	gcc -std=gnu99 -Wall -g -Os -lqpid-proton -lm -o $@ $^
+	gcc -std=gnu99 -Wall -g -Os -fno-omit-frame-pointer -lqpid-proton -lm -o $@ $^
 
 proton-receiver: proton-receiver.c proton-common.c
-	gcc -std=gnu99 -Wall -g -Os -lqpid-proton -lm -o $@ $^
+	gcc -std=gnu99 -Wall -g -Os -fno-omit-frame-pointer -lqpid-proton -lm -o $@ $^
 
 
 .PHONY: clean

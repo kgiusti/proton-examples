@@ -26,6 +26,7 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <errno.h>
+#include <time.h>
 
 #include "proton/reactor.h"
 #include "proton/message.h"
@@ -64,6 +65,7 @@ typedef struct {
     int debug;
     hosts_t host_addresses;
     int send_count;
+    int total;
     const char *target;
     size_t msg_len;
     uint64_t sequence;
@@ -77,6 +79,7 @@ typedef struct {
     size_t buffer_len;
     int reconnects;
     int duration;
+    time_t first_msg;
 } app_data_t;
 
 // helper to pull pointer to app_data_t instance out of the pn_handler_t
@@ -96,6 +99,7 @@ static void delete_handler(pn_handler_t *handler)
     free(app_data->encode_buffer);
 }
 
+static int send_message(app_data_t *app_data);
 
 /* Process interesting events posted by the reactor.
  * This is called from pn_reactor_process()
@@ -137,6 +141,22 @@ static void event_handler(pn_handler_t *handler,
         // shutdown - clean up connection and session..
         pn_session_close(pn_event_session(event));
         pn_connection_close(pn_event_connection(event));
+    } break;
+
+    case PN_LINK_FLOW: {
+        // the remote has given us some credit, now we can send messages
+        //
+        pn_link_t *sender = pn_event_link(event);
+        int credit = pn_link_credit(sender);
+        while (credit > 0 && data->send_count > 0) {
+            --credit;
+            send_message(data);
+
+            if (--data->send_count == 0) {
+                // this starts the shutdown process
+                pn_link_close(data->sender);
+            }
+        }
     } break;
 
     case PN_DELIVERY: {
@@ -223,7 +243,7 @@ static int parse_args(int argc, char *argv[], app_data_t *app)
     srand((unsigned int)now());
     app->debug = 0;
     hosts_init(&app->host_addresses, default_host);
-    app->send_count = 1;
+    app->total = app->send_count = 1;
     app->target = "topic";
     app->msg_len = 64;
     app->pre_settle = 0;
@@ -242,7 +262,7 @@ static int parse_args(int argc, char *argv[], app_data_t *app)
             hosts_init(&app->host_addresses, optarg);
             break;
         case 'c':
-            app->send_count = atoi(optarg);
+            app->total = app->send_count = atoi(optarg);
             break;
         case 't': app->target = optarg; break;
         case 's': app->msg_len = atoi(optarg); break;
@@ -305,12 +325,17 @@ static int send_message(app_data_t *app_data)
         || pn_link_credit(app_data->sender) <= 0)
         return 0;
 
+    time_t _now = now();
+    if (!app_data->first_msg) {
+        app_data->first_msg = _now;
+    }
+
     id.type = PN_ULONG;
     id.u.as_ulong = app_data->sequence++;
     pn_message_set_id(app_data->message, id);
     if (app_data->latency) {
         pn_message_set_creation_time(app_data->message,
-                                     (pn_timestamp_t)now());
+                                     (pn_timestamp_t)_now);
     }
 
     // now encode the message.
@@ -445,9 +470,10 @@ int main(int argc, char *argv[])
         pn_reactor_set_timeout(reactor, 0);
         pn_reactor_start(reactor);
 
-        time_t next_transmit = now();
+        // time_t next_transmit = now();
         // pn_reactor_process() returns 'true' until the connection is shut down.
         while (!done && pn_reactor_process(reactor)) {
+#if 0
             time_t n = now();
             if (n >= next_transmit) {
                 // pause interval expired, send a message
@@ -474,6 +500,9 @@ int main(int argc, char *argv[])
                 // adjust timeout to account for elapsed time
                 pn_reactor_set_timeout(reactor, next_transmit - n);
             }
+#else
+
+#endif
         }
         pn_reactor_free (reactor);
 
@@ -484,7 +513,14 @@ int main(int argc, char *argv[])
             app_data->reconnects++;
           }
     }
+
+    float duration = (now() - app_data->first_msg)/1000.0;
+    int sent = app_data->total - app_data->send_count;
+    printf("Sender Done! messages:%d duration:%f rate:%f\n",
+           sent,
+           duration,
+           duration ? sent/duration : -1.0);
     pn_decref (handler);
 
-    return 0;
+  return 0;
 }

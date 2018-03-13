@@ -35,7 +35,7 @@ int hosts_init(hosts_t *hosts, char *list)
            && hosts->count < MAX_HOSTS)
       {
         list = NULL;  // man strtok
-        hosts->hosts[hosts->count++] = host;
+        hosts->hosts[hosts->count++] = strdup(host);
       }
     if (host)
         fprintf(stderr, "only 10 failover addresses allowed\n");
