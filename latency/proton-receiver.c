@@ -94,6 +94,7 @@ typedef struct
   size_t buffer_len;
   pn_message_t *message;
   uint64_t expected_sequence;
+  unsigned received_msgs;
   unsigned dropped_msgs;      // based on sequence
   unsigned duplicate_msgs;    // based on sequence
   unsigned old_msgs;          // sent before receiver started (ignored)
@@ -111,6 +112,7 @@ typedef struct
   unsigned distribution[MAX_ORDER][100];
   unsigned overflow;
   unsigned reconnects;
+  unsigned duration;
 } app_data_t;
 
 // helper to pull pointer to app_data_t instance out of the pn_handler_t
@@ -355,7 +357,7 @@ static void process_message(app_data_t *data, const time_t now)
  else  //  missing timestamp
    {
      if (data->debug)
-       fprintf (stdout, "dropping message - no timestamp\n");
+       fprintf (stdout, "dropping message - no timestamp \n");
      ++data->no_time_msgs;
    }
 }
@@ -453,7 +455,35 @@ static void event_handler (pn_handler_t * handler,
                         process_message (data, _now);
                       }
 		  }
-	      }
+	      } else {
+		ssize_t len;
+		time_t _now = now ();
+		// try to decode the message body
+		if (pn_delivery_pending (dlv) > data->buffer_len)
+		  {
+		    data->buffer_len = pn_delivery_pending (dlv);
+		    free (data->decode_buffer);
+		    data->decode_buffer = (char *) malloc (data->buffer_len);
+		    if (!data->decode_buffer)
+		      fatal ("cannot allocate buffer");
+		  }
+
+		// read in the raw data
+		len =
+		  pn_link_recv (receiver, data->decode_buffer,
+				data->buffer_len);
+		if (len > 0)
+		  {
+		    // decode it into a proton message
+		    pn_message_clear (data->message);
+		    if (PN_OK ==
+			pn_message_decode (data->message, data->decode_buffer,
+					   len))
+                      {
+                        process_message (data, _now);
+                      }
+		  }
+	    }
 
 	    if (!pn_delivery_settled (dlv))
 	      {
@@ -465,6 +495,7 @@ static void event_handler (pn_handler_t * handler,
 	    // done with the delivery, move to the next and free it
 	    pn_link_advance (receiver);
 	    pn_delivery_settle (dlv);	// dlv is now freed
+	    data->received_msgs++;
 
 	    if (data->message_count > 0 && --data->message_count == 0)
 	      {
@@ -536,7 +567,7 @@ static int parse_args (int argc, char *argv[], app_data_t * app)
   app->latency = 0;
 
   opterr = 0;
-  while ((c = getopt (argc, argv, "a:c:t:i:p:S:luv")) != -1)
+  while ((c = getopt (argc, argv, "a:c:t:i:p:S:luvd:")) != -1)
     {
       switch (c)
 	{
@@ -566,6 +597,9 @@ static int parse_args (int argc, char *argv[], app_data_t * app)
 	  break;
 	case 'u':
 	  app->dump_csv = 1;
+	  break;
+	case 'd':
+	  app->duration = atoi (optarg);
 	  break;
 	default:
 	  fprintf (stderr, "Unknown option: %c\n", c);
@@ -644,6 +678,7 @@ int main (int argc, char *argv[])
 {
   errno = 0;
   signal (SIGINT, stop);
+  signal (SIGALRM, stop);
 
   /* Create a handler for the connection's events.  event_handler() will be
    * called for each event.  The handler will keep a pointer to the app_data
@@ -675,7 +710,10 @@ int main (int argc, char *argv[])
     pn_decref (handshaker);
   }
 
-
+  if (app_data->duration != 0) {
+    alarm(app_data->duration);
+  }
+    
   while (!done && app_data->message_count != 0)
     {
       time_t last_display = now ();
@@ -717,6 +755,9 @@ int main (int argc, char *argv[])
     }
 
   pn_decref (handler);
+  printf("Done!\nmessages:%d\ndropped:%d\n",
+	 app_data->received_msgs,
+	 app_data->dropped_msgs);
 
   return 0;
 }

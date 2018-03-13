@@ -76,6 +76,7 @@ typedef struct {
     char *encode_buffer;
     size_t buffer_len;
     int reconnects;
+    int duration;
 } app_data_t;
 
 // helper to pull pointer to app_data_t instance out of the pn_handler_t
@@ -212,7 +213,6 @@ static void usage(const char *name)
     printf("-l \tEnable latency measurement\n");
 }
 
-
 /* parse command line options */
 static int parse_args(int argc, char *argv[], app_data_t *app)
 {
@@ -230,9 +230,10 @@ static int parse_args(int argc, char *argv[], app_data_t *app)
     app->pause_min_msec = 0;
     app->pause_max_msec = 0;
     app->latency = 0;
+    app->duration = 0;
 
     opterr = 0;
-    while((c = getopt(argc, argv, "a:c:t:s:S:R:m:M:lpv")) != -1) {
+    while((c = getopt(argc, argv, "a:c:t:s:S:R:m:M:lpvd:")) != -1) {
         switch(c) {
         case 'h':
             usage(argv[0]);
@@ -251,6 +252,7 @@ static int parse_args(int argc, char *argv[], app_data_t *app)
         case 'm': app->pause_min_msec = atoi(optarg); break;
         case 'M': app->pause_max_msec = atoi(optarg); break;
         case 'l': app->latency = 1; break;
+        case 'd': app->duration = atoi(optarg); break;
         default:
             fprintf(stderr, "Unknown option: %c\n", c);
             usage(argv[0]);
@@ -341,11 +343,16 @@ static int send_message(app_data_t *app_data)
     return 1;
 }
 
+static void alarm_handler(int signo) {
+  done = 1;
+  printf("done! \n");
+}
 
 int main(int argc, char *argv[])
 {
     errno = 0;
     signal(SIGINT, stop);
+    signal(SIGALRM, alarm_handler);
 
     /* Create a handler for the connection's events.  event_handler() will be
      * called for each event and delete_handler will be called when the
@@ -395,6 +402,9 @@ int main(int argc, char *argv[])
     }
     pn_data_rewind(body);
 
+    if (app_data->duration != 0) {
+      alarm(app_data->duration);
+    }
     while (!done && app_data->send_count != 0) {
 
         pn_reactor_t *reactor = pn_reactor();
