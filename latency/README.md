@@ -29,7 +29,7 @@ localhost):
 display the current statistics every 10 seconds (-i 10), measure
 latency (-l), and stop after 200 messages (-c 200):
 
-  proton-receiver -a localhost:5672 -i 10 -l -c 2
+  proton-receiver -a localhost:5672 -i 10 -l -c 200
 
 
 2) start a proton-sender on another terminal.  This will send 200
